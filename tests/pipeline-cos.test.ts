@@ -77,7 +77,7 @@ describe("Config-Driven Scoring", () => {
       sourceType: "apollo", externalRef: "baseline-1", title: "Baseline Studio",
       accountName: "Baseline Games", contactName: "John Smith",
       contactEmail: "john@baseline.com", summary: "Test", freshness: 0.85,
-      suggestedPath: "warm",
+      suggestedPath: "warm" as const,
     };
 
     const r1 = scoreOpportunityCandidate(candidate, null);

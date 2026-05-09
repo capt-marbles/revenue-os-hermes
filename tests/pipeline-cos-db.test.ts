@@ -179,7 +179,7 @@ describe("CoS Insights", () => {
     // Verify clean start
     expect(getActiveInsights()).toHaveLength(0);
 
-    createInsight({ category: "info", severity: "info", title: "Noisy", detail: "Noise" });
+    createInsight({ category: "pattern", severity: "info", title: "Noisy", detail: "Noise" });
     expect(getActiveInsights()).toHaveLength(1);
 
     dismissInsight(getActiveInsights()[0].id);
@@ -269,8 +269,9 @@ describe("Change Proposals", () => {
 
     expect(rejectChangeProposal(id, "Too risky")).toBe(true);
     const entry = getProposalHistory().find((h: any) => h.id === id);
-    expect(entry.status).toBe("rejected");
-    expect(entry.rejectionReason).toBe("Too risky");
+    expect(entry).toBeDefined();
+    expect(entry!.status).toBe("rejected");
+    expect(entry!.rejectionReason).toBe("Too risky");
   });
 });
 

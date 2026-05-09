@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockDispatchMatchingTriggers = vi.fn();
-const mockGetOrCreateSystemConversation = vi.fn(() => "conv-webhook-1");
+const mockGetOrCreateSystemConversation = vi.fn((..._args: unknown[]) => "conv-webhook-1");
 const mockCopilotChatSync = vi.fn();
 const mockIngestOpportunityCandidate = vi.fn();
 
