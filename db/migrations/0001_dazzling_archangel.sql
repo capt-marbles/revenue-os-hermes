@@ -1,0 +1,1 @@
+ALTER TABLE `sequence_steps` ADD `group` integer DEFAULT 0 NOT NULL;

@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `timeout_seconds` integer;

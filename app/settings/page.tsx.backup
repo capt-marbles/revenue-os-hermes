@@ -1,0 +1,807 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { PageShell } from "@/components/layout/page-shell";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Loader2,
+  Mail,
+  Calendar,
+  HardDrive,
+  Table,
+  Users,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Copy,
+  Check,
+  MessageCircle,
+  Play,
+  Square,
+  Gauge,
+} from "lucide-react";
+import { toast } from "sonner";
+import { ScheduleCard, type Schedule } from "@/components/schedules/schedule-card";
+import { ScheduleForm } from "@/components/schedules/schedule-form";
+
+interface Connector {
+  id: string | null;
+  definitionId: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  status: "connected" | "disconnected";
+  configured: boolean;
+  requiredEnv: string;
+}
+
+interface Policy {
+  id: string;
+  name: string;
+  type: string;
+  scope: string;
+  enabled: number;
+  targetAgentId: string | null;
+  updatedAt: string;
+}
+
+interface Trigger {
+  id: string;
+  name: string;
+  type: string;
+  status: "active" | "paused" | "error";
+  targetType: string;
+  targetId: string;
+  updatedAt: string;
+}
+
+const ICON_MAP: Record<string, React.ReactNode> = {
+  mail: <Mail className="size-4" />,
+  calendar: <Calendar className="size-4" />,
+  "hard-drive": <HardDrive className="size-4" />,
+  table: <Table className="size-4" />,
+  users: <Users className="size-4" />,
+};
+
+export default function SettingsPage() {
+  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  // Schedules state
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [triggers, setTriggers] = useState<Trigger[]>([]);
+  const [automationLoading, setAutomationLoading] = useState(true);
+
+  // Telegram state
+  const [telegramPolling, setTelegramPolling] = useState(false);
+  const [telegramConfigured, setTelegramConfigured] = useState(false);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+
+  // Queue / Performance state
+  const [queueActive, setQueueActive] = useState(0);
+  const [queueQueued, setQueueQueued] = useState(0);
+  const [maxConcurrent, setMaxConcurrent] = useState(3);
+  const [maxBatchSize, setMaxBatchSize] = useState(20);
+  const [queueLoading, setQueueLoading] = useState(true);
+  const [queueSaving, setQueueSaving] = useState(false);
+
+  const fetchConnectors = useCallback(async () => {
+    try {
+      const res = await fetch("/api/connectors");
+      if (!res.ok) throw new Error("Failed to load connectors");
+      const data = await res.json();
+      setConnectors(data);
+    } catch (err) {
+      console.error("Failed to load connectors:", err);
+      toast.error("Failed to load connectors");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchSchedules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/schedules");
+      if (!res.ok) throw new Error("Failed to load schedules");
+      const data = await res.json();
+      setSchedules(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to load schedules:", err);
+      toast.error("Failed to load schedules");
+    } finally {
+      setSchedulesLoading(false);
+    }
+  }, []);
+
+  const fetchTelegramStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/telegram/start");
+      if (res.ok) {
+        const data = await res.json();
+        setTelegramPolling(data.polling);
+        setTelegramConfigured(data.configured);
+      }
+    } catch (err) {
+      console.error("Failed to fetch Telegram status:", err);
+    }
+  }, []);
+
+  const fetchQueue = useCallback(async () => {
+    try {
+      const res = await fetch("/api/queue");
+      if (!res.ok) throw new Error("Failed to load queue stats");
+      const data = await res.json();
+      setQueueActive(data.active ?? 0);
+      setQueueQueued(data.queued ?? 0);
+      setMaxConcurrent(data.maxConcurrent ?? 3);
+      setMaxBatchSize(data.maxBatchSize ?? 20);
+    } catch (err) {
+      console.error("Failed to load queue stats:", err);
+    } finally {
+      setQueueLoading(false);
+    }
+  }, []);
+
+  // Poll queue stats every 5 seconds
+  useEffect(() => {
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 5000);
+    return () => clearInterval(interval);
+  }, [fetchQueue]);
+
+  async function saveQueueSettings() {
+    setQueueSaving(true);
+    try {
+      const res = await fetch("/api/queue", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxConcurrent, maxBatchSize }),
+      });
+      if (!res.ok) throw new Error("Failed to save queue settings");
+      toast.success("Queue settings saved");
+    } catch (err) {
+      console.error("Failed to save queue settings:", err);
+      toast.error("Failed to save queue settings");
+    } finally {
+      setQueueSaving(false);
+    }
+  }
+  const fetchAutomation = useCallback(async () => {
+    try {
+      const [policyRes, triggerRes] = await Promise.all([
+        fetch("/api/policies"),
+        fetch("/api/triggers"),
+      ]);
+      const [policyData, triggerData] = await Promise.all([
+        policyRes.ok ? policyRes.json() : [],
+        triggerRes.ok ? triggerRes.json() : [],
+      ]);
+      setPolicies(Array.isArray(policyData) ? policyData : []);
+      setTriggers(Array.isArray(triggerData) ? triggerData : []);
+    } catch (err) {
+      console.error("Failed to load automation settings:", err);
+      toast.error("Failed to load triggers and policies");
+    } finally {
+      setAutomationLoading(false);
+    }
+  }, []);
+  async function toggleTelegram() {
+    setTelegramLoading(true);
+    try {
+      const endpoint = telegramPolling ? "/api/telegram/stop" : "/api/telegram/start";
+      const res = await fetch(endpoint, { method: "POST" });
+      if (res.ok) {
+        setTelegramPolling(!telegramPolling);
+      } else {
+        toast.error(`Failed to ${telegramPolling ? "stop" : "start"} Telegram bot`);
+      }
+    } catch (err) {
+      console.error("Telegram toggle failed:", err);
+      toast.error(`Failed to ${telegramPolling ? "stop" : "start"} Telegram bot`);
+    } finally {
+      setTelegramLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchConnectors();
+    fetchSchedules();
+    fetchTelegramStatus();
+    fetchAutomation();
+  }, [fetchAutomation, fetchConnectors, fetchSchedules, fetchTelegramStatus]);
+
+  async function toggleSchedule(id: string, enabled: boolean) {
+    // Optimistic update
+    setSchedules((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, enabled: enabled ? 1 : 0 } : s))
+    );
+    try {
+      const res = await fetch(`/api/schedules/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabled ? 1 : 0 }),
+      });
+      if (!res.ok) fetchSchedules();
+    } catch {
+      fetchSchedules();
+    }
+  }
+
+  async function deleteSchedule(id: string) {
+    // Optimistic update
+    setSchedules((prev) => prev.filter((s) => s.id !== id));
+    try {
+      const res = await fetch(`/api/schedules/${id}`, { method: "DELETE" });
+      if (!res.ok) fetchSchedules();
+    } catch {
+      fetchSchedules();
+    }
+  }
+
+  async function togglePolicy(id: string, enabled: boolean) {
+    setPolicies((prev) => prev.map((p) => (p.id === id ? { ...p, enabled: enabled ? 1 : 0 } : p)));
+    try {
+      const res = await fetch(`/api/policies/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabled ? 1 : 0 }),
+      });
+      if (!res.ok) fetchAutomation();
+    } catch {
+      fetchAutomation();
+    }
+  }
+
+  async function deletePolicy(id: string) {
+    setPolicies((prev) => prev.filter((p) => p.id !== id));
+    try {
+      const res = await fetch(`/api/policies/${id}`, { method: "DELETE" });
+      if (!res.ok) fetchAutomation();
+    } catch {
+      fetchAutomation();
+    }
+  }
+
+  async function toggleTrigger(id: string, active: boolean) {
+    setTriggers((prev) => prev.map((t) => (t.id === id ? { ...t, status: active ? "active" : "paused" } : t)));
+    try {
+      const res = await fetch(`/api/triggers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: active ? "active" : "paused" }),
+      });
+      if (!res.ok) fetchAutomation();
+    } catch {
+      fetchAutomation();
+    }
+  }
+
+  async function deleteTrigger(id: string) {
+    setTriggers((prev) => prev.filter((t) => t.id !== id));
+    try {
+      const res = await fetch(`/api/triggers/${id}`, { method: "DELETE" });
+      if (!res.ok) fetchAutomation();
+    } catch {
+      fetchAutomation();
+    }
+  }
+
+  async function dispatchTrigger(id: string, name: string) {
+    const input = window.prompt("Dispatch input", `Manual dispatch for ${name}`);
+    if (!input) return;
+    try {
+      const res = await fetch(`/api/triggers/${id}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input, source: "manual" }),
+      });
+      if (!res.ok) throw new Error("Dispatch failed");
+      toast.success(`Triggered ${name}`);
+    } catch {
+      toast.error(`Failed to dispatch ${name}`);
+    }
+  }
+
+  function copyCronCommand() {
+    const cmd = `* * * * * curl -s -X POST "http://localhost:3000/api/scheduler/trigger?token=$OPERATOR_TOKEN"`;
+    navigator.clipboard.writeText(cmd).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  async function toggleConnector(definitionId: string, currentStatus: string) {
+    const newStatus = currentStatus === "connected" ? "disconnected" : "connected";
+    setToggling(definitionId);
+
+    // Optimistic update
+    setConnectors((prev) =>
+      prev.map((c) =>
+        c.definitionId === definitionId ? { ...c, status: newStatus as Connector["status"] } : c
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/connectors/${definitionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) fetchConnectors();
+    } catch {
+      fetchConnectors();
+    } finally {
+      setToggling(null);
+    }
+  }
+
+  // Group by category
+  const categories = new Map<string, Connector[]>();
+  for (const c of connectors) {
+    const group = categories.get(c.category) || [];
+    group.push(c);
+    categories.set(c.category, group);
+  }
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    "google-workspace": "Google Workspace",
+    "crm": "CRM",
+  };
+
+  return (
+    <PageShell title="Settings" description="Connectors and configuration">
+      <div className="p-6 max-w-3xl space-y-8">
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <>
+            {/* Connectors */}
+            <section>
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">Connectors</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  External tools that agents can use. Connect a service, then any agent can interact with it.
+                </p>
+              </div>
+
+              {Array.from(categories.entries()).map(([category, items]) => (
+                <div key={category} className="space-y-3">
+                  <h3 className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
+                    {CATEGORY_LABELS[category] || category}
+                  </h3>
+
+                  <div className="space-y-2">
+                    {items.map((conn) => (
+                      <Card key={conn.definitionId}>
+                        <CardContent className="flex items-center gap-4 py-4">
+                          {/* Icon */}
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                            {ICON_MAP[conn.icon] || <AlertCircle className="size-4" />}
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium">{conn.name}</p>
+                              {conn.status === "connected" && (
+                                <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px]">
+                                  <CheckCircle className="size-2.5" />
+                                  Connected
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {conn.description}
+                            </p>
+                          </div>
+
+                          {/* Action */}
+                          <div className="shrink-0">
+                            {!conn.configured ? (
+                              <div className="text-right">
+                                <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                  <XCircle className="size-2.5" />
+                                  Key missing
+                                </Badge>
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  Set <code className="font-mono bg-muted px-1 rounded">{conn.requiredEnv}</code> in .env.local
+                                </p>
+                              </div>
+                            ) : (
+                              <Button
+                                variant={conn.status === "connected" ? "outline" : "default"}
+                                size="sm"
+                                onClick={() => toggleConnector(conn.definitionId, conn.status)}
+                                disabled={toggling === conn.definitionId}
+                              >
+                                {toggling === conn.definitionId ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : conn.status === "connected" ? (
+                                  "Disconnect"
+                                ) : (
+                                  "Connect"
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <Separator />
+
+            <section>
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">Automation</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Policies decide what to do. Triggers decide when to wake the Chief of Staff or specialists.
+                </p>
+              </div>
+
+              {automationLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Policies</h3>
+                      <Badge variant="outline" className="text-[10px]">{policies.length}</Badge>
+                    </div>
+                    <div className="space-y-2">
+                      {policies.map((policy) => (
+                        <Card key={policy.id}>
+                          <CardContent className="flex items-center gap-4 py-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium">{policy.name}</p>
+                                <Badge variant="secondary" className="text-[10px]">{policy.type}</Badge>
+                                <Badge variant="outline" className="text-[10px]">{policy.scope}</Badge>
+                              </div>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {policy.enabled ? "Enabled" : "Paused"} &middot; Updated {new Date(policy.updatedAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <Button variant="ghost" size="icon-xs" onClick={() => deletePolicy(policy.id)}>
+                              <XCircle className="size-3.5" />
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => togglePolicy(policy.id, !policy.enabled)}>
+                              {policy.enabled ? "Pause" : "Enable"}
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Triggers</h3>
+                      <Badge variant="outline" className="text-[10px]">{triggers.length}</Badge>
+                    </div>
+                    <div className="space-y-2">
+                      {triggers.map((trigger) => (
+                        <Card key={trigger.id}>
+                          <CardContent className="flex items-center gap-4 py-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium">{trigger.name}</p>
+                                <Badge variant="secondary" className="text-[10px]">{trigger.type}</Badge>
+                                <Badge variant={trigger.status === "active" ? "secondary" : "outline"} className="text-[10px]">
+                                  {trigger.status}
+                                </Badge>
+                              </div>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                Routes to {trigger.targetType} &middot; Updated {new Date(trigger.updatedAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <Button variant="outline" size="sm" onClick={() => dispatchTrigger(trigger.id, trigger.name)}>
+                              Fire
+                            </Button>
+                            <Button variant="ghost" size="icon-xs" onClick={() => deleteTrigger(trigger.id)}>
+                              <XCircle className="size-3.5" />
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => toggleTrigger(trigger.id, trigger.status !== "active")}>
+                              {trigger.status === "active" ? "Pause" : "Enable"}
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 rounded-lg border border-border bg-muted/30 p-4">
+                      <h3 className="text-sm font-medium">Webhook Event Ingestion</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Send external events to <code className="rounded bg-muted px-1 font-mono">/api/events/webhook</code> with <code className="rounded bg-muted px-1 font-mono">eventType</code>, <code className="rounded bg-muted px-1 font-mono">input</code>, and optional metadata.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <Separator />
+
+            {/* Info */}
+            <section>
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <h3 className="text-sm font-medium">How connectors work</h3>
+                <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                  <li>Connected tools are available to all agents via MCP (Model Context Protocol).</li>
+                  <li>Agents can read emails, create drafts, manage calendar events, and more.</li>
+                  <li>All Maton connectors use a single API key — add it to <code className="font-mono bg-muted px-1 rounded">.env.local</code>.</li>
+                  <li>Get your key at <a href="https://ctrl.maton.ai" target="_blank" rel="noopener" className="underline underline-offset-2 hover:text-foreground">ctrl.maton.ai</a>.</li>
+                </ul>
+              </div>
+            </section>
+
+            <Separator />
+
+            {/* Telegram */}
+            <section>
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">Telegram Bot</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Chat with the Co-Pilot and run commands from Telegram.
+                </p>
+              </div>
+
+              <Card>
+                <CardContent className="flex items-center gap-4 py-4">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600">
+                    <MessageCircle className="size-4" />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">Telegram Bot</p>
+                      {telegramPolling && (
+                        <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px]">
+                          <CheckCircle className="size-2.5" />
+                          Running
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {telegramConfigured
+                        ? telegramPolling
+                          ? "Bot is polling for messages. Send /help to your bot."
+                          : "Bot token configured. Click Start to begin polling."
+                        : "Set TELEGRAM_BOT_TOKEN in .env.local (create a bot via @BotFather)"}
+                    </p>
+                  </div>
+
+                  <div className="shrink-0">
+                    {!telegramConfigured ? (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        <XCircle className="size-2.5" />
+                        Token missing
+                      </Badge>
+                    ) : (
+                      <Button
+                        variant={telegramPolling ? "outline" : "default"}
+                        size="sm"
+                        onClick={toggleTelegram}
+                        disabled={telegramLoading}
+                      >
+                        {telegramLoading ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : telegramPolling ? (
+                          <>
+                            <Square className="size-3" data-icon="inline-start" />
+                            Stop
+                          </>
+                        ) : (
+                          <>
+                            <Play className="size-3" data-icon="inline-start" />
+                            Start
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            <Separator />
+
+            {/* Performance */}
+            <section>
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">Performance</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Configure queue concurrency and batch limits for agent
+                  processing.
+                </p>
+              </div>
+
+              {queueLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Live stats */}
+                  <Card>
+                    <CardContent className="flex items-center gap-4 py-4">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600">
+                        <Gauge className="size-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">Queue Status</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Live stats, updated every 5 seconds
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="text-center">
+                          <p className="text-lg font-semibold tabular-nums">
+                            {queueActive}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                            Active
+                          </p>
+                        </div>
+                        <Separator orientation="vertical" className="h-8" />
+                        <div className="text-center">
+                          <p className="text-lg font-semibold tabular-nums">
+                            {queueQueued}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                            Queued
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Settings */}
+                  <Card>
+                    <CardContent className="py-4 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="max-concurrent">
+                            Max concurrent agents
+                          </Label>
+                          <Input
+                            id="max-concurrent"
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={maxConcurrent}
+                            onChange={(e) =>
+                              setMaxConcurrent(
+                                Math.max(
+                                  1,
+                                  Math.min(20, Number(e.target.value) || 1)
+                                )
+                              )
+                            }
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            1 &ndash; 20. How many agents can run at once.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="max-batch">Max batch size</Label>
+                          <Input
+                            id="max-batch"
+                            type="number"
+                            min={0}
+                            value={maxBatchSize}
+                            onChange={(e) =>
+                              setMaxBatchSize(
+                                Math.max(0, Number(e.target.value) || 0)
+                              )
+                            }
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            0 = unlimited. Max inputs per batch run.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={saveQueueSettings}
+                          disabled={queueSaving}
+                        >
+                          {queueSaving && (
+                            <Loader2
+                              className="size-3 animate-spin"
+                              data-icon="inline-start"
+                            />
+                          )}
+                          {queueSaving ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </section>
+
+            <Separator />
+
+            {/* Schedules */}
+            <section>
+              <div className="mb-4 flex items-start justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold">Schedules</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Run agents and sequences automatically on a recurring schedule.
+                  </p>
+                </div>
+                <ScheduleForm onCreated={fetchSchedules} />
+              </div>
+
+              {schedulesLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : schedules.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border py-10 text-center">
+                  <p className="text-sm text-muted-foreground">No schedules yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Create one to run agents or sequences on autopilot.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {schedules.map((schedule) => (
+                    <ScheduleCard
+                      key={schedule.id}
+                      schedule={schedule}
+                      onToggle={toggleSchedule}
+                      onDelete={deleteSchedule}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Setup instructions */}
+              <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
+                <h3 className="text-sm font-medium">Activate the scheduler</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Add this cron job to your server to trigger scheduled runs every minute:
+                </p>
+                <div className="relative mt-2">
+                  <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs font-mono text-foreground">
+                    {`* * * * * curl -s -X POST "http://localhost:3000/api/scheduler/trigger?token=$OPERATOR_TOKEN"`}
+                  </pre>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="absolute top-2 right-2 text-muted-foreground"
+                    onClick={copyCronCommand}
+                    aria-label="Copy cron command"
+                  >
+                    {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  </Button>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+      </div>
+    </PageShell>
+  );
+}

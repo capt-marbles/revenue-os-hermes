@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `hermes_task_id` text;

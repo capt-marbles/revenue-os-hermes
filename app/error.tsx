@@ -1,0 +1,27 @@
+"use client";
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
+      <div className="text-lg font-medium text-red-400">Something went wrong</div>
+      <p className="text-sm text-muted-foreground max-w-md text-center">
+        {error.message || "An unexpected error occurred."}
+      </p>
+      {error.digest && (
+        <p className="text-xs text-muted-foreground/50">Error ID: {error.digest}</p>
+      )}
+      <button
+        onClick={reset}
+        className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}

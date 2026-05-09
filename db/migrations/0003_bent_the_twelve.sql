@@ -1,0 +1,1 @@
+ALTER TABLE `desks` ADD `global` integer DEFAULT 0;
